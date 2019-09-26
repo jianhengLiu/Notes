@@ -1,5 +1,13 @@
 # Vrep
 
+| scenes | https://github.com/CoppeliaRobotics/scenes |
+| ------ | ------------------------------------------ |
+|        |                                            |
+|        |                                            |
+|        |                                            |
+
+
+
 # 0.安装
 
 下载并解压
@@ -680,13 +688,6 @@ end
 
 # 本节介绍
 
-前面的废话比较多，现在正式介绍本节的内容。vrep已经提供了和matlab的接口，通过Remote API进行连接，通过含有`Get`的函数从Vrep端读取数据，通过含有`Set`的函数将matlab的数据传输到vrep。数据可以是vrep中提供的一些类型数据，比如Postion，Velocity等等这些；当然也可以设置一些用户自定义的数据，比如你要通过matlab调节pid，可以通过matlab打包（pack）这些数据，然后在vrep中进行解包（unpack）。这一节仍然是基于vrep小车，完成以下几方面内容：
-
-1. matlab控制小车运动和停止；
-2. matlab控制小车运动到某个固定位置；
-3. 添加视觉传感器，并将传感器图像传输到matlab中；
-   **完整例程模型请点击购买**
-
 # Step1 准备工作
 
 matlab和vrep连接需要一些基本文件。首先要注意你的系统是**32位**的还是**64位**的，还有你安装的vrep的版本。
@@ -730,4 +731,952 @@ matlab和vrep连接需要一些基本文件。首先要注意你的系统是**32
 3. 当你搞不清坐标转换关系时，用一堆dummy去求相对位置和角度
 
 大家刚开始用，要慢慢体会dummy的妙处，我这里先抛砖引玉。这里我们要在两个车轮的中心位置添加一个dummy，作为车辆的回转中心，同时添加一个目标位置，一会我们通过移动目标位置（黄色区域），控制小车能够准确驶入目标区域。我们使用这个状态作为起始状态，文件名为`Vrep3_car_code_Step1.ttt`，获取文件请[点击购买](https://item.taobao.com/item.htm?spm=0.7095261.0.0.2eb4cc2dOQp9u5&id=564553923700)。
+
+
+
+# 关节控制
+
+http://www.coppeliarobotics.com/helpFiles/en/jointDescription.htm
+
+There are many different ways a joint can be controlled. In following section, we differentiate betwen a ***loose*** controller and a ***precise*** controller: a ***loose*** joint controller will not be able to provide new control values in each possible regulation step (e.g. some regulation steps might/will be skipped, but control is still possible). A ***precise*** joint controller on the other hand, will be able to provide control values in each possible regulation step.
+
+First, the approach to take for controlling a joint will depend on the joint mode:
+
+[The joint is not in force/torque mode](http://www.coppeliarobotics.com/helpFiles/en/jointDescription.htm#nonForceTorqueMode).
+
+[The joint operates in force/torque mode](http://www.coppeliarobotics.com/helpFiles/en/jointDescription.htm#forceTorqueMode).
+
+The differentiation comes from the fact that a joint that operates in force/torque mode will be handled by the physics engine. And the physics engine will perform by default 10 times more calculation steps than the simulation loop: the simulation loop runs at 20Hz (in simulation time), while the physics engine runs at 200Hz (also in simulation time). That default behaviour can entirely be configured if required.
+
+**If the joint is not in force/torque mode**: if the joint is not in force/torque mode, then you can directly (and instantaneously) set its position via the [sim.setJointPosition](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simSetJointPosition.htm) API function (or similar, e.g. [simxSetJointPosition](http://www.coppeliarobotics.com/helpFiles/en/b0RemoteApi-cpp.htm#simxSetJointPosition) for the B0-based remote API, or [simxSetJointPosition](http://www.coppeliarobotics.com/helpFiles/en/remoteApiFunctions.htm#simxSetJointPosition) for the legacy remote API). You can do this from a [child script](http://www.coppeliarobotics.com/helpFiles/en/childScripts.htm), from a [plugin](http://www.coppeliarobotics.com/helpFiles/en/plugins.htm), from a [ROS](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaces.htm) node, from a [BlueZero](http://www.coppeliarobotics.com/helpFiles/en/blueZeroPlugin.htm) node, or from a [remote API](http://www.coppeliarobotics.com/helpFiles/en/remoteApiOverview.htm) client. If you do this from a child script, then it should be done inside of the *actuation section* of the [non-threaded child script](http://www.coppeliarobotics.com/helpFiles/en/childScripts.htm#nonThreaded), or from a [threaded child script](http://www.coppeliarobotics.com/helpFiles/en/childScripts.htm#threaded) that executes before the *sensing phase* of the [main script](http://www.coppeliarobotics.com/helpFiles/en/mainScript.htm) (default). In the latter case however, make sure to have your threaded child script synchronized with the simulation loop for ***precise*** control.
+
+In following [threaded child script](http://www.coppeliarobotics.com/helpFiles/en/childScripts.htm#threaded) example, the joint is controlled ***loosely*** in position, and there is no synchronization with the simulation loop:
+
+```
+-- Following script should run threaded:
+
+jointHandle=sim.getObjectHandle('Revolute_joint')
+
+sim.setJointPosition(jointHandle,90*math.pi/180) -- set the position to 90 degrees
+sim.wait(2) -- wait 2 seconds (in simulation time)
+sim.setJointPosition(jointHandle,180*math.pi/180) -- set the position to 180 degrees
+sim.wait(1) -- wait 1 second (in simulation time)
+sim.setJointPosition(jointHandle,0*math.pi/180) -- set the position to 0 degrees
+etc.
+```
+
+In following [threaded child script](http://www.coppeliarobotics.com/helpFiles/en/childScripts.htm#threaded) example, the joint is controlled **precisely** in position in each simulation step, i.e. the thread is synchronized with the simulation loop:
+
+```
+-- Following script should run threaded:
+
+sim.setThreadSwitchTiming(200) -- Automatic thread switching to a large value (200ms)
+jointHandle=sim.getObjectHandle('Revolute_joint')
+
+sim.setJointPosition(jointHandle,90*math.pi/180) -- set the position to 90 degrees
+sim.switchThread() -- the thread resumes in next simulation step (i.e. when t becomes t+dt)
+sim.setJointPosition(jointHandle,180*math.pi/180) -- set the position to 180 degrees
+sim.switchThread() -- the thread resumes in next simulation step
+sim.setJointPosition(jointHandle,0*math.pi/180) -- set the position to 0 degrees
+sim.switchThread() -- the thread resumes in next simulation step
+-- etc.
+
+-- In above code, a new joint position is applied in each simulation step
+```
+
+When you try to control a joint that is not in force/torque mode from an external application (e.g. via the [remote API](http://www.coppeliarobotics.com/helpFiles/en/remoteApiOverview.htm), [ROS](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaces.htm) or [BlueZero](http://www.coppeliarobotics.com/helpFiles/en/blueZeroPlugin.htm)), then the external controller will run asynchronously to V-REP (i.e. similar to the non-synchronized code of a [threaded child script](http://www.coppeliarobotics.com/helpFiles/en/childScripts.htm#threaded)). This is fine most of the time for **loose** control, but if you wish to control the position of the joint **precisely** in each simulation loop, you will have to run V-REP in synchronous mode, and the external controller (e.g. the remote API client) will have to trigger each simulation step explicitely.
+
+# 摄像头
+
+float view->view->add associated camera
+
+
+
+# 5.Lua
+
+类matlab
+
+# 6.Ros
+
+| **vrep_ros_bridge**                                          | https://github.com/lagadic/vrep_ros_bridge#installation-plugin |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| [Lua Table 操作](https://www.cnblogs.com/plateFace/p/4762218.html) | https://www.cnblogs.com/plateFace/p/4762218.html             |
+|                                                              |                                                              |
+|                                                              |                                                              |
+
+# RosInterface
+
+下面看一个简单的例子。在场景中选择一个物体添加一个non-threaded脚本，这个脚本会发布仿真时间然后自己订阅它，并且还会发布坐标变换消息：
+
+```
+function subscriber_callback(msg)
+    -- This is the subscriber callback function
+    simAddStatusbarMessage('subscriber receiver following Float32: '..msg.data)
+end
+
+function getTransformStamped(objHandle,name,relTo,relToName)
+    -- This function retrieves the stamped transform for a specific object
+    t=simGetSystemTime()
+    p=simGetObjectPosition(objHandle,relTo)
+    o=simGetObjectQuaternion(objHandle,relTo)
+    return {
+        header={
+            stamp=t,
+            frame_id=relToName
+        },
+        child_frame_id=name,
+        transform={
+            translation={x=p[1],y=p[2],z=p[3]},
+            rotation={x=o[1],y=o[2],z=o[3],w=o[4]}
+        }
+    }
+end
+
+if (sim_call_type==sim_childscriptcall_initialization) then
+    -- The child script initialization
+    objectHandle=simGetObjectAssociatedWithScript(sim_handle_self)
+    objectName=simGetObjectName(objectHandle)
+    -- Check if the required RosInterface is there:
+    moduleName=0
+    index=0
+    rosInterfacePresent=false
+    while moduleName do
+        moduleName=simGetModuleName(index)
+        if (moduleName=='RosInterface') then
+            rosInterfacePresent=true
+        end
+        index=index+1
+    end
+
+    -- Prepare the float32 publisher and subscriber (we subscribe to the topic we advertise):
+    if rosInterfacePresent then
+        publisher=simExtRosInterface_advertise('/simulationTime','std_msgs/Float32')
+        subscriber=simExtRosInterface_subscribe('/simulationTime','std_msgs/Float32','subscriber_callback')
+    end
+end
+
+if (sim_call_type==sim_childscriptcall_actuation) then
+    -- Send an updated simulation time message, and send the transform of the object attached to this script:
+    if rosInterfacePresent then
+        simExtRosInterface_publish(publisher,{data=simGetSimulationTime()})
+        simExtRosInterface_sendTransform(getTransformStamped(objectHandle,objectName,-1,'world'))
+        -- To send several transforms at once, use simExtRosInterface_sendTransforms instead
+    end
+end
+
+if (sim_call_type==sim_childscriptcall_cleanup) then
+    -- Following not really needed in a simulation script (i.e. automatically shut down at simulation end):
+    if rosInterfacePresent then
+        simExtRosInterface_shutdownPublisher(publisher)
+        simExtRosInterface_shutdownSubscriber(subscriber)
+    end
+end
+```
+
+![img](Vrep.assets/890966-20171118110333202-1381870629.png)
+
+　　终端中输入rostopic list指令查看话题：
+
+![img](Vrep.assets/890966-20171118104938327-1394250792.png)
+
+　　为了查看消息的内容，可以输入：
+
+```
+$ rostopic echo /simulationTime
+```
+
+![img](Vrep.assets/890966-20171118110345687-866366411.png)
+
+脚本中主要用到下面几个函数：
+
+- simExtRosInterface_advertise
+
+![img](Vrep.assets/890966-20171118112003187-213506184.png)
+
+```lua
+publisher=simExtRosInterface_advertise('/simulationTime','std_msgs/Float32')
+```
+
+- simExtRosInterface_subscribe
+
+![img](Vrep.assets/890966-20171118112049671-2015937757.png)
+
+```lua
+subscriber=simExtRosInterface_subscribe('/simulationTime','std_msgs/Float32','subscriber_callback')
+```
+
+- simExtRosInterface_publish
+
+![img](Vrep.assets/890966-20171118111907265-776018305.png)
+
+```lua
+simExtRosInterface_publish(publisher,{data=simGetSimulationTime()})
+```
+
+将table类型的数据写入publisher里并发布出去，table类型见[Lua Table 操作](https://www.cnblogs.com/plateFace/p/4762218.html)
+
+- simExtRosInterface_sendTransform
+
+ ![img](Vrep.assets/890966-20171118112214265-1447918325.png)
+
+```lua
+simExtRosInterface_sendTransform(getTransformStamped(objectHandle,objectName,-1,'world'))
+```
+
+**rosInterfaceTopicPublisherAndSubscriber**
+
+　　在V-rep自带的例子中还有一个场景模型"rosInterfaceTopicPublisherAndSubscriber.ttt"，脚本代码中会发布视觉传感器捕获的图像信息到/image话题上，同时会自己订阅这个信息并显示出来。
+
+![img](Vrep.assets/890966-20171118172939015-377512510.png)
+
+![img](Vrep.assets/ExpandedBlockStart-1569073208814.gif)
+
+```lua
+-- This illustrates how to publish and subscribe to an image using the ROS Interface.
+-- An alternate version using image transport can be created with following functions:
+--
+-- simExtRosInterface_imageTransportAdvertise
+-- simExtRosInterface_imageTransportPublish
+-- simExtRosInterface_imageTransportShutdownPublisher
+-- simExtRosInterface_imageTransportShutdownSubscriber
+-- simExtRosInterface_imageTransportSubscribe
+
+function imageMessage_callback(msg)
+    -- Apply the received image to the passive vision sensor that acts as an image container
+    simSetVisionSensorCharImage(passiveVisionSensor,msg.data)
+end
+
+if (sim_call_type==sim_childscriptcall_initialization) then
+    -- Get some handles:
+    activeVisionSensor=simGetObjectHandle('Vision_sensor')
+    passiveVisionSensor=simGetObjectHandle('PassiveVision_sensor')
+
+    -- Enable an image publisher and subscriber:
+    pub=simExtRosInterface_advertise('/image', 'sensor_msgs/Image')
+    --定义了发布image的图像Topic的句柄handle
+    --After calling this function, this publisher will treat uint8 arrays as string. Using strings should be in general much faster that using int arrays in Lua.
+    simExtRosInterface_publisherTreatUInt8ArrayAsString(pub) -- treat uint8 arrays as strings (much faster, tables/arrays are kind of slow in Lua)
+    --设置句柄接收和输出数据类型，以实现强行将uin8数组转成string并发布出去，这个函数不是发布函数，是句柄的设置函数
+
+    sub=simExtRosInterface_subscribe('/image', 'sensor_msgs/Image', 'imageMessage_callback')
+    --定义句柄，订阅/image的节点，并运行回调函数
+    simExtRosInterface_subscriberTreatUInt8ArrayAsString(sub) -- treat uint8 arrays as strings (much faster, tables/arrays are kind of slow in Lua)
+    --设置句柄，强转订阅
+end
+
+if (sim_call_type==sim_childscriptcall_sensing) then
+    -- Publish the image of the active vision sensor:
+    local data,w,h=simGetVisionSensorCharImage(activeVisionSensor)
+    --下面时table类型的初始化赋值图像信息
+    d={}
+    d['header']={seq=0,stamp=simExtRosInterface_getTime(), frame_id="a"}
+    d['height']=h
+    d['width']=w
+    d['encoding']='rgb8'
+    --bigendian大端；正序
+    d['is_bigendian']=1
+    d['step']=w*3
+    d['data']=data
+    simExtRosInterface_publish(pub,d)
+end
+
+if (sim_call_type==sim_childscriptcall_cleanup) then
+    -- Shut down publisher and subscriber. Not really needed from a simulation script (automatic shutdown)
+    simExtRosInterface_shutdownPublisher(pub)
+    simExtRosInterface_shutdownSubscriber(sub)
+end
+```
+
+　　可以在终端中输入下面的命令来显示/image话题的图像：
+
+```
+$ rosrun image_view image_view image:=/image
+```
+
+![img](Vrep.assets/890966-20171118175053593-1099801697.gif)
+
+ 　　在rviz中添加Image，将话题选为/image也可以查看图像信息：
+
+![img](Vrep.assets/890966-20171118175345499-948679321.png)
+
+**controlTypeExamples**
+
+ 　　还有一个例子是controlTypeExamples.ttt，V-rep中的脚本负责发布接近传感器的信息以及仿真时间并订阅左右轮驱动的话题。外部的ros程序rosBubbleRob2根据接收到的传感器信息生成左右轮速度指令，并发布出去，V-rep中订阅后在回调函数里控制左右轮关节转动。
+
+![img](Vrep.assets/890966-20171118201009515-667693919.gif)
+
+　　V-rep中脚本代码如下：
+
+```lua
+function setLeftMotorVelocity_cb(msg)
+
+    -- Left motor speed subscriber callback
+
+    simSetJointTargetVelocity(leftMotor,msg.data)
+
+end
+
+
+
+function setRightMotorVelocity_cb(msg)
+
+    -- Right motor speed subscriber callback
+
+    simSetJointTargetVelocity(rightMotor,msg.data)
+
+end
+
+
+
+function getTransformStamped(objHandle,name,relTo,relToName)
+
+    t=simGetSystemTime()
+
+    p=simGetObjectPosition(objHandle,relTo)
+--objectHandle: handle of the object物体的句柄
+--relativeToObjectHandle: indicates relative to which reference frame we want the position. Specify -1 to retrieve the absolute position, sim_handle_parent to retrieve the position relative to the object's parent, or an object handle relative to whose reference frame we want the position.  当为-1时返回绝对位置，为sim_handle_parent时返回相对于父坐标系下的位置，即相对位置
+    o=simGetObjectQuaternion(objHandle,relTo)
+--返回table类型
+    return {
+
+        header={
+
+            stamp=t,
+--设置frame_id
+            frame_id=relToName
+
+        },
+
+        child_frame_id=name,
+
+        transform={
+
+            translation={x=p[1],y=p[2],z=p[3]},
+
+            rotation={x=o[1],y=o[2],z=o[3],w=o[4]}
+
+        }
+
+    }
+
+end
+
+
+
+if (sim_call_type==sim_childscriptcall_initialization) then
+
+    robotHandle=simGetObjectAssociatedWithScript(sim_handle_self)
+
+    leftMotor=simGetObjectHandle("rosInterfaceControlledBubbleRobLeftMotor") -- Handle of the left motor
+
+    rightMotor=simGetObjectHandle("rosInterfaceControlledBubbleRobRightMotor") -- Handle of the right motor
+
+    noseSensor=simGetObjectHandle("rosInterfaceControlledBubbleRobSensingNose") -- Handle of the proximity sensor
+
+
+
+    -- Check if the required ROS plugin is there:
+
+    moduleName=0
+
+    moduleVersion=0
+
+    index=0
+
+    pluginNotFound=true
+
+    while moduleName do
+
+        moduleName,moduleVersion=simGetModuleName(index)
+
+        if (moduleName=='RosInterface') then
+
+            pluginNotFound=false
+
+        end
+
+        index=index+1
+
+    end
+
+
+
+    -- Add a banner:
+
+    if (pluginNotFound) then
+
+        bannerText="I cannot run! (I couldn't find my RosInterface plugin)"
+
+    else
+
+        bannerText="I am controlled via a ROS node and the RosInterface! ('rosBubbleRob2' controlls me)"
+
+    end
+
+    black={0,0,0,0,0,0,0,0,0,0,0,0}
+
+    red={0,0,0,0,0,0,0,0,0,1,0.2,0.2}
+
+    simAddBanner(bannerText,0,sim_banner_bitmapfo2019-09-21 22-26-03屏幕截图nt+sim_banner_overlay,nil,simGetObjectAssociatedWithScript(sim_handle_self),black,red)
+
+
+
+    -- Ok now launch the ROS client application:
+
+    if (not pluginNotFound) then
+
+        local sysTime=simGetSystemTimeInMs(-1) 
+
+        local leftMotorTopicName='leftMotorSpeed'..sysTime -- we add a random component so that we can have several instances of this robot running
+        --末尾添加初始化时的时间，实现多台车子同时运行
+
+        local rightMotorTopicName='rightMotorSpeed'..sysTime -- we add a random component so that we can have several instances of this robot running
+
+        local sensorTopicName='sensorTrigger'..sysTime -- we add a random component so that we can have several instances of this robot running
+
+        local simulationTimeTopicName='simTime'..sysTime -- we add a random component so that we can have several instances of this robot running
+
+
+
+        -- Prepare the sensor publisher and the motor speed subscribers:
+
+        sensorPub=simExtRosInterface_advertise('/'..sensorTopicName,'std_msgs/Bool')
+
+        simTimePub=simExtRosInterface_advertise('/'..simulationTimeTopicName,'std_msgs/Float32')
+
+        leftMotorSub=simExtRosInterface_subscribe('/'..leftMotorTopicName,'std_msgs/Float32','setLeftMotorVelocity_cb')
+
+        rightMotorSub=simExtRosInterface_subscribe('/2019-09-21 22-26-03屏幕截图'..rightMotorTopicName,'std_msgs/Float32','setRightMotorVelocity_cb')
+
+
+
+        -- Now we start the client application:
+
+        result=simLaunchExecutable('rosBubbleRob2',leftMotorTopicName.." "..rightMotorTopicName.." "..sensorTopicName.." "..simulationTimeTopicName,0)
+
+    end2019-09-21 22-26-03屏幕截图
+
+end
+
+
+
+if (sim_call_type==sim_childscriptcall_actuation) then
+
+    -- Send an updated sensor and simulation time message, and send the transform of the robot:
+
+    if not pluginNotFound then
+
+        local result=simReadProximitySensor(noseSensor)
+
+        local detectionTrigger={}
+
+        detectionTrigger['data']=result>0
+
+        simExtRosInterface_publish(sensorPub,detectionTrigger)
+
+        simExtRosInterface_publish(simTimePub,{data=simGetSimulationTime()})
+
+        -- Send the robot's transform:
+
+        simExtRosInterface_sendTransform(getTransformStamped(robotHandle,'rosInterfaceControlledBubbleRob',-1,'world'))
+            --getTransformStamped(robotHandle,'rosInterfaceControlledBubbleRob',-1,'world')
+            --该函数是这个脚本自己定义的函数，详细可以看上
+            --获取robotHandle的绝对位置，并将自坐标系设为'rosInterfaceControlledBubbleRob'，-1表示返回绝对位置，'world'为frame_id
+
+        -- To send several transforms at once, use simExtRosInterface_sendTransforms instead
+
+    end
+
+end
+
+
+
+if (sim_call_type==sim_childscriptcall_cleanup) then
+
+    if not pluginNotFound then
+
+        -- Following not really needed in a simulation script (i.e. automatically shut down at simulation end):
+
+        simExtRosInterface_shutdownPublisher(sensorPub)
+
+        simExtRosInterface_shutdownSubscriber(leftMotorSub)
+
+        simExtRosInterface_shutdownSubscriber(rightMotorSub)
+
+    end
+
+end
+```
+
+### simSetJointPosition / sim.setJointPosition
+
+| Description       | Sets the intrinsic position of a joint. May have no effect depending on the joint mode. This function cannot be used with spherical joints (use [sim.setSphericalJointMatrix](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simSetSphericalJointMatrix.htm) instead). See also [sim.getJointPosition](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simGetJointPosition.htm) and [sim.setJointTargetPosition](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simSetJointTargetPosition.htm). |
+| ----------------- | ------------------------------------------------------------ |
+| C synopsis        | simInt simSetJointPosition(simInt objectHandle,simFloat position) |
+| C parameters      | **objectHandle**: handle of the joint object**position**: position of the joint (angular or linear value depending on the joint type) |
+| C return value    | -1 if operation was not successful. In a future release, a more differentiated return value might be available |
+| Lua synopsis      | number result=sim.setJointPosition(number objectHandle,number position) |
+| Lua parameters    | Same as C-function                                           |
+| Lua return values | Same as C-function                                           |
+| Remote API equiv. | B0-based remote API: [simxSetJointPosition](http://www.coppeliarobotics.com/helpFiles/en/b0RemoteApi-cpp.htm#simxSetJointPosition)Legacy remote API: [simxSetJointPosition](http://www.coppeliarobotics.com/helpFiles/en/remoteApiFunctions.htm#simxSetJointPosition) |
+
+### simGetObjectPosition / sim.getObjectPosition
+
+| Description       | Retrieves the position of an object. See also [sim.setObjectPosition](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simSetObjectPosition.htm), [sim.getObjectOrientation](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simGetObjectOrientation.htm), [sim.getObjectMatrix](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simGetObjectMatrix.htm) and the other [matrix/transformation fun**ctions](http://www.coppeliarobotics.com/helpFiles/en/apiFunctionListCategory.htm#coordinatesAndTransformations). |
+| ----------------- | ------------------------------------------------------------ |
+| C synopsis        | simInt simGetObjectPosition(simInt objectHandle,simInt relativeToObjectHandle,simFloat* position) |
+| C parameters      | **objectHandle**: handle of the object**relativeToObjectHandle**: indicates relative to which reference frame we want the position. Specify -1 to retrieve the absolute position, sim_handle_parent to retrieve the position relative to the object's parent, or an object handle relative to whose reference frame we want the position. **position**: pointer to 3 values (x, y and z) |
+| C return value    | -1 if operation was not successful. In a future release, a more differentiated return value might be available |
+| Lua synopsis      | table_3 position=sim.getObjectPosition(number objectHandle,number relativeToObjectHandle) |
+| Lua parameters    | Same as C-function                                           |
+| Lua return values | **position**: table of 3 values (x, y and z) or nil in case of an error |
+| Remote API equiv. | B0-based remote API: [simxGetObjectPosition](http://www.coppeliarobotics.com/helpFiles/en/b0RemoteApi-cpp.htm#simxGetObjectPosition), [simxGetObjectPose](http://www.coppeliarobotics.com/helpFiles/en/b0RemoteApi-cpp.htm#simxGetObjectPose)Legacy remote API: [simxGetObjectPosition](http://www.coppeliarobotics.com/helpFiles/en/remoteApiFunctions.htm#simxGetObjectPosition) |
+
+### simSetObjectPosition / sim.setObjectPosition
+
+| Description       | Sets the position (x, y and z-coordinates) of an object. Dynamically simulated objects will implicitely be reset before the command is applied (i.e. similar to calling [sim.resetDynamicObject](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simResetDynamicObject.htm) just before). See also [sim.getObjectPosition](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simGetObjectPosition.htm), [sim.setObjectOrientation](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simSetObjectOrientation.htm), [sim.setObjectMatrix](http://www.coppeliarobotics.com/helpFiles/en/regularApi/simSetObjectMatrix.htm) and the other [matrix/transformation functions](http://www.coppeliarobotics.com/helpFiles/en/apiFunctionListCategory.htm#coordinatesAndTransformations). |
+| ----------------- | ------------------------------------------------------------ |
+| C synopsis        | simInt simSetObjectPosition(simInt objectHandle,simInt relativeToObjectHandle,const simFloat* position) |
+| C parameters      | **objectHandle**: handle of the object**relativeToObjectHandle**: indicates relative to which reference frame the position is specified. Specify -1 to set the absolute position, sim_handle_parent to set the position relative to the object's parent, or an object handle relative to whose reference frame the position is specified. **position**: coordinates of the object (x, y and z) |
+| C return value    | -1 if operation was not successful. In a future release, a more differentiated return value might be available |
+| Lua synopsis      | number result=sim.setObjectPosition(number objectHandle,number relativeToObjectHandle,table_3 position) |
+| Lua parameters    | Same as C-function                                           |
+| Lua return values | Same as C-function                                           |
+| Remote API equiv. | B0-based remote API: [simxSetObjectPosition](http://www.coppeliarobotics.com/helpFiles/en/b0RemoteApi-cpp.htm#simxSetObjectPosition), [simxSetObjectPose](http://www.coppeliarobotics.com/helpFiles/en/b0RemoteApi-cpp.htm#simxSetObjectPose)Legacy remote API: [simxSetObjectPosition](http://www.coppeliarobotics.com/helpFiles/en/remoteApiFunctions.htm#simxSetObjectPosition) |
+
+### simLaunchExecutable / sim.launchExecutable
+
+| Description       | Launches an executable. Similar to os.execute or io.popen, but is system independent. |
+| ----------------- | ------------------------------------------------------------ |
+| C synopsis        | -                                                            |
+| C parameters      | -                                                            |
+| C return value    | -                                                            |
+| Lua synopsis      | number result=sim.launchExecutable(string filename,string parameters='',number showStatus=1) |
+| Lua parameters    | **filename**: file name of the executable. If the filename starts with '@', then it will be considered as a system command, otherwise the current directory might be automatically prepended to the filename if it makes sense.**parameters**: optional input arguments**showStatus**: 0 to hide the application's window, 1 to show it. Works only with Windows OS. |
+| Lua return values | **result**: -1 if operation was not successful. Under Windows OS, if the application could not be launched, return value is -1. Under Mac OS or Linux, return value might be different from -1 even if the application could not be launched. |
+
+### simROS.sendTransform
+
+| Description       | Publish a TF transformation between frames.                  |
+| ----------------- | ------------------------------------------------------------ |
+| Lua synopsis      | simROS.sendTransform(table transform)                        |
+| Lua parameters    | **transform** (table of ): the transformation expressed as a geometry_msgs/TransformStamped message, i.e. {header={stamp=timeStamp, frame_id='...'}, child_frame_id='...', transform={translation={x=..., y=..., z=...}, rotation={x=..., y=..., z=..., w=...}}} |
+| Lua return values | -                                                            |
+| See also          | [simROS.advertise](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#advertise) [simROS.imageTransportAdvertise](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#imageTransportAdvertise) [simROS.imageTransportPublish](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#imageTransportPublish) [simROS.imageTransportShutdownPublisher](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#imageTransportShutdownPublisher) [simROS.imageTransportShutdownSubscriber](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#imageTransportShutdownSubscriber) [simROS.imageTransportSubscribe](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#imageTransportSubscribe) [simROS.publish](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#publish) [simROS.publisherTreatUInt8ArrayAsString](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#publisherTreatUInt8ArrayAsString) [simROS.sendTransforms](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#sendTransforms) [simROS.shutdownPublisher](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#shutdownPublisher) [simROS.shutdownSubscriber](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#shutdownSubscriber) [simROS.subscribe](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#subscribe) [simROS.subscriberTreatUInt8ArrayAsString](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#subscriberTreatUInt8ArrayAsString) [simROS.sendTransforms](http://www.coppeliarobotics.com/helpFiles/en/rosInterfaceApi.htm#sendTransforms) |
+
+# vrep_ros_bridge
+
+This is the list of the objects supported by the plugin:
+
+- Robots:
+  - Manipulators and mobile robots ([manipulator_handler](http://wiki.ros.org/manipulator_handler))机械手
+  - Quadrotors ([quadrotor_handler](http://wiki.ros.org/quadrotor_handler))四旋翼
+- Sensors:
+  - Vision sensor ([camera_handler](http://wiki.ros.org/camera_handler))视觉
+  - IMU sensor ([imu_handler](http://wiki.ros.org/imu_handler))惯导
+
+and this is the list of the handlers to control and describe the simulation:
+
+- Rigid body handler: ([rigid_body_handler](http://wiki.ros.org/rigid_body_handler))
+  - Pose:
+    - Set pose
+    - Get pose
+  - Twist:
+    - Set Twist
+    - Get Twist
+
+The next section show how to link the plugin with an object in V-REP.
+
+### Handlers
+
+We have an object in the scene (let's say a quadrotor) and we want that the plugin [vrep_ros_bridge](http://wiki.ros.org/vrep_ros_bridge) manage it. To do it we will have to **tag the object with a predefined string**.（需预先定义标记目标） If we don't do it the plugin will not act on the object. We will show how to tag a quadrotor but the procedure for the other objects will be similar.**标记目标**
+
+Procedure:
+
+- Right Click on the object you want to add the custom data (on the 'Scene hierarchy' (on the right) or directly on the scene)
+
+- Click on 'Add --> Associated child script --> Non threated'
+
+- The general structure of the child script (written in [LUA](http://www.lua.org/)) is:
+
+ ```
+  if (simGetScriptExecutionCount()==0) then
+  -- Put your Initialization code, executed only once (at the beginning of the simulation)
+  -- 初始化代码，只运行一次的
+  end
+  
+  simHandleChildScript(sim_handle_all_except_explicit)
+  --主函数，每次仿真循环运行一次
+  -- Put your main code here. It will act at each iteration of the simulation.
+  
+  if (simGetSimulationState()==sim_simulation_advancing_lastbeforestop) then
+  -- 终止时运行的恢复代码
+  -- Put some restoration code here
+  end
+ ```
+
+Now we have to add some instructions:
+
+```
+quadrotor = simGetObjectAssociatedWithScript(sim_handle_self)
+simExtSetFloatCustomDataFromHeader(quadrotor, sim_ext_ros_bridge_quadrotor_data_main, 0.0)
+```
+
+withing the initialization code.
+
+The function `simExtSetFloatCustomDataFromHeader()` adds a custom data to the object related to `sim_ext_ros_bridge_set_obj_twist_data_main`.（将数据关联物体） As we can see, the function requires a third input.（该函数需要第三方输入，函数中的**0.0**） If requested, we can add a value to our custom data, setting the third input of the function. **In our case, since we don't want to use this additional parameter we set it to zero (it will be ignored).** We can add float and int values. If you want to add an int value you have to use the function `simExtSetIntCustomDataFromHeader()`. You can find the list of the Custom Lua Variables in the description of each handler. Moreover you will find the complete list in the file [access.cpp](https://github.com/lagadic/vrep_ros_bridge/blob/master/vrep_ros_plugin/src/access.cpp) (From line 149). **In certain case the third values will be important (for instance to set the frequency of the camera acquisition).** You will find more information about these commands in each wiki.ros page dedicated to the packages.（猜想，`sim_ext_ros_bridge_set_obj_twist_data_main`为定义的关联数据，0,0可替换为我们所需的数据写入`sim_ext_ros_bridge_set_obj_twist_data_main`即可）
+
+# ROS中利用V-rep进行地图构建仿真](https://www.cnblogs.com/21207-iHome/p/7844865.html)
+
+## V-rep中显示激光扫描点 　
+
+　　在VREP自带的场景中找到practicalPathPlanningDemo.ttt文件，删除场景中多余的物体只保留静态的地图。然后在Model browser→components→sensors中找到SICK TiM310 Fast激光雷达，拖入场景中：
+
+![img](Vrep.assets/890966-20171120160859868-427189622.png)
+
+　　打开脚本参数修改器，可以修改雷达扫描范围（默认为270°），是否显示雷达扫描线（true），以及最大探测距离（默认为4m）这三个参数。地图大小为5m×5m，我们将雷达最大探测距离改为2m![img](Vrep.assets/890966-20171120161431899-2062189076.png)
+
+　　将激光雷达放到地图中任意位置，点击仿真按钮可以看到扫描光线（如果电脑比较卡可以将showLaserSegments这个参数设为false，就不会显示扫描线）如下图所示：
+
+![img](Vrep.assets/890966-20171120160911024-1737182404.png)
+
+ 　　SICK_TiM310激光雷达在V-rep中是由两个视角为135°的视觉传感器模拟的，这两个视觉传感器可以探测深度信息：
+
+![img](Vrep.assets/890966-20171120162129258-1141907249.png)
+
+　　双击视觉传感器图标，修改Filter中Coordinate Extraction的参数与传感器X/Y方向分辨率一致。X方向默认值为135，即会返回135个数据点，这里要改为256。
+
+![img](Vrep.assets/890966-20171120162235711-1450040825.png)
+
+ 　　我们可以在V-rep中绘制出激光扫描图：在场景中添加一个Graph，将其设为显示处理（Explicit handling），然后添加用户自定义数据x和y：
+
+![img](Vrep.assets/890966-20171120163908165-105863211.png)
+
+　　然后点击Edit XY graphs按钮，在弹出的对话框中添加一个新的曲线。X-value选择我们之前自定义的数据x，Y-value选择自定义的数据y，并去掉Link points选项：
+
+![img](Vrep.assets/890966-20171120164034149-1202496189.png)
+
+　　将SICK_TiM310_fast的lua脚本代码修改如下：
+
+```lua
+if (sim_call_type==sim_childscriptcall_initialization) then 
+    visionSensor1Handle=simGetObjectHandle("SICK_TiM310_sensor1")
+    visionSensor2Handle=simGetObjectHandle("SICK_TiM310_sensor2")
+    joint1Handle=simGetObjectHandle("SICK_TiM310_joint1")
+    joint2Handle=simGetObjectHandle("SICK_TiM310_joint2")
+    sensorRefHandle=simGetObjectHandle("SICK_TiM310_ref")
+    graphHandle = simGetObjectHandle("Graph")
+
+    maxScanDistance=simGetScriptSimulationParameter(sim_handle_self,'maxScanDistance')
+    if maxScanDistance>1000 then maxScanDistance=1000 end
+    if maxScanDistance<0.1 then maxScanDistance=0.1 end
+    simSetObjectFloatParameter(visionSensor1Handle,sim_visionfloatparam_far_clipping,maxScanDistance)
+    simSetObjectFloatParameter(visionSensor2Handle,sim_visionfloatparam_far_clipping,maxScanDistance)
+    maxScanDistance_=maxScanDistance*0.9999
+
+    scanningAngle=simGetScriptSimulationParameter(sim_handle_self,'scanAngle')
+    if scanningAngle>270 then scanningAngle=270 end
+    if scanningAngle<2 then scanningAngle=2 end
+    scanningAngle=scanningAngle*math.pi/180
+    simSetObjectFloatParameter(visionSensor1Handle,sim_visionfloatparam_perspective_angle,scanningAngle/2)
+    simSetObjectFloatParameter(visionSensor2Handle,sim_visionfloatparam_perspective_angle,scanningAngle/2)
+
+    simSetJointPosition(joint1Handle,-scanningAngle/4)
+    simSetJointPosition(joint2Handle,scanningAngle/4)
+    red={1,0,0}
+    lines=simAddDrawingObject(sim_drawing_lines,1,0,-1,1000,nil,nil,nil,red)
+
+    if (simGetInt32Parameter(sim_intparam_program_version)<30004) then
+        simDisplayDialog("ERROR","This version of the SICK sensor is only supported from V-REP V3.0.4 and upwards.&&nMake sure to update your V-REP.",sim_dlgstyle_ok,false,nil,{0.8,0,0,0,0,0},{0.5,0,0,1,1,1})
+    end
+end 
+
+
+if (sim_call_type==sim_childscriptcall_cleanup) then 
+    simRemoveDrawingObject(lines)
+    simResetGraph(graphHandle)
+end 
+
+
+if (sim_call_type==sim_childscriptcall_sensing) then 
+    measuredData={}
+
+    if notFirstHere then
+        -- We skip the very first reading
+        simAddDrawingObjectItem(lines,nil)
+        showLines=simGetScriptSimulationParameter(sim_handle_self,'showLaserSegments')
+        r,t1,u1=simReadVisionSensor(visionSensor1Handle)
+        r,t2,u2=simReadVisionSensor(visionSensor2Handle)
+    
+        m1=simGetObjectMatrix(visionSensor1Handle,-1)
+        m01=simGetInvertedMatrix(simGetObjectMatrix(sensorRefHandle,-1))
+        m01=simMultiplyMatrices(m01,m1)
+        m2=simGetObjectMatrix(visionSensor2Handle,-1)
+        m02=simGetInvertedMatrix(simGetObjectMatrix(sensorRefHandle,-1))
+        m02=simMultiplyMatrices(m02,m2)
+        if u1 then
+            p={0,0,0}
+            p=simMultiplyVector(m1,p)
+            t={p[1],p[2],p[3],0,0,0}
+            for j=0,u1[2]-1,1 do
+                for i=0,u1[1]-1,1 do
+                    w=2+4*(j*u1[1]+i)
+                    v1=u1[w+1]
+                    v2=u1[w+2]
+                    v3=u1[w+3]
+                    v4=u1[w+4]
+                    if (v4<maxScanDistance_) then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m01,p)
+                        table.insert(measuredData,p[1])
+                        table.insert(measuredData,p[2]) 
+                        table.insert(measuredData,p[3])
+                    end
+                    if showLines then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m1,p)
+                        t[4]=p[1]
+                        t[5]=p[2]
+                        t[6]=p[3]
+                        simAddDrawingObjectItem(lines,t)
+                    end
+                end
+            end
+        end
+        if u2 then
+            p={0,0,0}
+            p=simMultiplyVector(m2,p)
+            t={p[1],p[2],p[3],0,0,0}
+            for j=0,u2[2]-1,1 do
+                for i=0,u2[1]-1,1 do
+                    w=2+4*(j*u2[1]+i)
+                    v1=u2[w+1]
+                    v2=u2[w+2]
+                    v3=u2[w+3]
+                    v4=u2[w+4]
+                    if (v4<maxScanDistance_) then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m02,p)
+                        table.insert(measuredData,p[1])
+                        table.insert(measuredData,p[2])
+                        table.insert(measuredData,p[3])
+                    end
+                    if showLines then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m2,p)
+                        t[4]=p[1]
+                        t[5]=p[2]
+                        t[6]=p[3]
+                        simAddDrawingObjectItem(lines,t)
+                    end
+                end
+            end
+        end
+    end
+    notFirstHere=true
+
+    --stringData = simPackFloatTable(measuredData) -- Packs a table of floating-point numbers into a string
+    --simSetStringSignal("UserData", stringData)
+
+    simResetGraph(graphHandle)
+    for i=1,#measuredData/3,1 do
+        simSetGraphUserData(graphHandle,'x',measuredData[3*(i-1)+1])
+        simSetGraphUserData(graphHandle,'y',measuredData[3*(i-1)+2])
+        simHandleGraph(graphHandle,0) 
+    end
+
+end
+```
+
+点击仿真按钮，可以在X/Y graph窗口中看到激光扫描结果如下：
+
+![img](Vrep.assets/890966-20171120163243633-1788297778.png)
+
+　　V-rep中的视觉传感器可以探测到障碍物的坐标以及与其距离，上面的X-Y图就是直接采用坐标点画出的。然而一般激光雷达只能探测障碍物距离，不能直接获取其坐标，我们可以将距离画成与角度对应的极坐标图。将距离数据保存为CSV文件，用Mathematica读入并画出极坐标图：
+
+```
+ranges = Flatten[Import["C:\\Users\\Administrator\\Desktop\\distance.csv"]];
+ListPolarPlot[ranges, DataRange -> {-135 Degree, 135 Degree}]
+```
+
+## 发布LaserScan消息 
+
+ 　　下面的代码将激光雷达扫描数据按照LaserScan的消息格式发布出去：
+
+![img](Vrep.assets/ExpandedBlockStart.gif)
+
+[![复制代码](Vrep.assets/copycode.gif)](javascript:void(0);)
+
+```lua
+if (sim_call_type==sim_childscriptcall_initialization) then 
+    visionSensor1Handle=simGetObjectHandle("SICK_TiM310_sensor1")
+    visionSensor2Handle=simGetObjectHandle("SICK_TiM310_sensor2")
+    joint1Handle=simGetObjectHandle("SICK_TiM310_joint1")
+    joint2Handle=simGetObjectHandle("SICK_TiM310_joint2")
+    sensorRefHandle=simGetObjectHandle("SICK_TiM310_ref")
+
+    maxScanDistance=simGetScriptSimulationParameter(sim_handle_self,'maxScanDistance')
+    if maxScanDistance>1000 then maxScanDistance=1000 end
+    if maxScanDistance<0.1 then maxScanDistance=0.1 end
+    simSetObjectFloatParameter(visionSensor1Handle,sim_visionfloatparam_far_clipping,maxScanDistance)
+    simSetObjectFloatParameter(visionSensor2Handle,sim_visionfloatparam_far_clipping,maxScanDistance)
+    maxScanDistance_=maxScanDistance*0.9999
+
+    scanningAngle=simGetScriptSimulationParameter(sim_handle_self,'scanAngle')
+    if scanningAngle>270 then scanningAngle=270 end
+    if scanningAngle<2 then scanningAngle=2 end
+    scanningAngle=scanningAngle*math.pi/180
+    simSetObjectFloatParameter(visionSensor1Handle,sim_visionfloatparam_perspective_angle,scanningAngle/2)
+    simSetObjectFloatParameter(visionSensor2Handle,sim_visionfloatparam_perspective_angle,scanningAngle/2)
+
+    simSetJointPosition(joint1Handle,-scanningAngle/4)
+    simSetJointPosition(joint2Handle,scanningAngle/4)
+    red={1,0,0}
+    lines=simAddDrawingObject(sim_drawing_lines,1,0,-1,1000,nil,nil,nil,red)
+
+    if (simGetInt32Parameter(sim_intparam_program_version)<30004) then
+        simDisplayDialog("ERROR","This version of the SICK sensor is only supported from V-REP V3.0.4 and upwards.&&nMake sure to update your V-REP.",sim_dlgstyle_ok,false,nil,{0.8,0,0,0,0,0},{0.5,0,0,1,1,1})
+    end
+
+    -- Enable an LaserScan publisher:
+    pub = simExtRosInterface_advertise('/scan', 'sensor_msgs/LaserScan')
+    --After calling this function, this publisher will treat uint8 arrays as string. Using strings should be in general much faster that using int arrays in Lua.
+    simExtRosInterface_publisherTreatUInt8ArrayAsString(pub) -- treat uint8 arrays as strings (much faster, tables/arrays are kind of slow in Lua)
+
+    angle_min= -135 * (math.pi/180);        -- angle correspond to FIRST beam in scan ( in rad)
+    angle_max= 135 * (math.pi/180)          -- angle correspond to LAST beam in scan ( in rad)
+    angle_increment = 270*(math.pi/180)/512 -- Angular resolution i.e angle between 2 beams
+
+    -- sensor scans every 50ms with 512 beams. Each beam is measured in  (50 ms/ 512 )
+    time_increment  = (1 / 20) / 512
+
+    range_min = 0.05 
+    range_max = maxScanDistance -- scan can measure upto this range
+end 
+
+if (sim_call_type==sim_childscriptcall_cleanup) then 
+    simRemoveDrawingObject(lines)
+    simExtRosInterface_shutdownPublisher(pub)
+end 
+
+if (sim_call_type==sim_childscriptcall_sensing) then 
+    measuredData={}
+    distanceData={}
+
+    if notFirstHere then
+        -- We skip the very first reading
+        simAddDrawingObjectItem(lines,nil)
+        showLines=simGetScriptSimulationParameter(sim_handle_self,'showLaserSegments')
+        r,t1,u1=simReadVisionSensor(visionSensor1Handle)
+        r,t2,u2=simReadVisionSensor(visionSensor2Handle)
+    
+        m1=simGetObjectMatrix(visionSensor1Handle,-1)
+        m01=simGetInvertedMatrix(simGetObjectMatrix(sensorRefHandle,-1))
+        m01=simMultiplyMatrices(m01,m1)
+        m2=simGetObjectMatrix(visionSensor2Handle,-1)
+        m02=simGetInvertedMatrix(simGetObjectMatrix(sensorRefHandle,-1))
+        m02=simMultiplyMatrices(m02,m2)
+        if u1 then
+            p={0,0,0}
+            p=simMultiplyVector(m1,p)
+            t={p[1],p[2],p[3],0,0,0}
+            for j=0,u1[2]-1,1 do
+                for i=0,u1[1]-1,1 do
+                    w=2+4*(j*u1[1]+i)
+                    v1=u1[w+1]
+                    v2=u1[w+2]
+                    v3=u1[w+3]
+                    v4=u1[w+4]
+                    table.insert(distanceData,v4)
+                    if (v4<maxScanDistance_) then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m01,p)
+                        table.insert(measuredData,p[1])
+                        table.insert(measuredData,p[2])
+                        table.insert(measuredData,p[3])
+                    end
+                    if showLines then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m1,p)
+                        t[4]=p[1]
+                        t[5]=p[2]
+                        t[6]=p[3]
+                        simAddDrawingObjectItem(lines,t)
+                    end
+                end
+            end
+        end
+        if u2 then
+            p={0,0,0}
+            p=simMultiplyVector(m2,p)
+            t={p[1],p[2],p[3],0,0,0}
+            for j=0,u2[2]-1,1 do
+                for i=0,u2[1]-1,1 do
+                    w=2+4*(j*u2[1]+i)
+                    v1=u2[w+1]
+                    v2=u2[w+2]
+                    v3=u2[w+3]
+                    v4=u2[w+4]
+                    table.insert(distanceData,v4)
+                    if (v4<maxScanDistance_) then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m02,p)
+                        table.insert(measuredData,p[1])
+                        table.insert(measuredData,p[2])
+                        table.insert(measuredData,p[3])
+                    end
+                    if showLines then
+                        p={v1,v2,v3}
+                        p=simMultiplyVector(m2,p)
+                        t[4]=p[1]
+                        t[5]=p[2]
+                        t[6]=p[3]
+                        simAddDrawingObjectItem(lines,t)
+                    end
+                end
+            end
+        end
+    end
+    notFirstHere=true
+
+    -- populate the LaserScan message
+    scan={}
+    scan['header']={seq=0,stamp=simExtRosInterface_getTime(), frame_id="SICK_TiM310_ref"}
+    scan['angle_min']=angle_min
+    scan['angle_max']=angle_max
+    scan['angle_increment']=angle_increment
+    scan['time_increment']=time_increment
+    scan['scan_time']=simExtRosInterface_getTime() -- Return the current ROS time i.e. the time returned by ros::Time::now()
+    scan['range_min']=range_min
+    scan['range_max']=range_max
+    scan['ranges'] = distanceD插件会在场景中查找已知对象以进行管理。它创建ROS发布者以发送模拟数据ata
+    scan['intensities']={}    
+
+    simExtRosInterface_publish(pub, scan)
+end
+```
+
+　　注意代码中发布的距离是相对于视觉传感器坐标系的，因为模型中视觉传感器坐标系与激光雷达坐标系（SICK_TiM310_ref）在X、Y方向的位置是一致的，而Z坐标只存在一点高度差异，并不会影响X-Y平面内障碍物相对于SICK_TiM310_ref参考坐标系的位置坐标。如果这两个坐标系在X、Y方向存在偏差，就需要将采集到的数据点转换到SICK_TiM310_ref坐标系中。
+
+　　另外代码中变量v4为激光雷达探测到的距物体的距离，如果在最大扫描范围内没有探测到物体，则会返回最大值。由于这个距离与扫描角度是一一对应的，因此要注意table.insert函数的使用，不能放在下一句的if语句之中，否则在超过最大扫描范围的地方不会向列表内插入距离数据，这样会造成距离与角度不匹配，可能导致激光图像出现歪斜。
+
+　　点击仿真按钮，程序运行没问题后在rviz中可以添加LaserScan进行查看：
+
+![img](Vrep.assets/890966-20171120174838680-1193807431.png)
+
+
+
+## issues
+
+### vrep_ros_bridge
+
+![1568630747642](Vrep.assets/1568630747642.png)
+
+在`vrep_ros_bridge/vrep_ros_plugin/CMakeLists.txt`添加
+
+```
+add_compile_options(-std=c++11)
+```
+
+
 
