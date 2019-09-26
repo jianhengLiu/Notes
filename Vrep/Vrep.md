@@ -732,6 +732,7 @@ matlab和vrep连接需要一些基本文件。首先要注意你的系统是**32
 
 大家刚开始用，要慢慢体会dummy的妙处，我这里先抛砖引玉。这里我们要在两个车轮的中心位置添加一个dummy，作为车辆的回转中心，同时添加一个目标位置，一会我们通过移动目标位置（黄色区域），控制小车能够准确驶入目标区域。我们使用这个状态作为起始状态，文件名为`Vrep3_car_code_Step1.ttt`，获取文件请[点击购买](https://item.taobao.com/item.htm?spm=0.7095261.0.0.2eb4cc2dOQp9u5&id=564553923700)。
 
+<<<<<<< HEAD
 
 
 # 关节控制
@@ -1680,3 +1681,321 @@ add_compile_options(-std=c++11)
 
 
 
+=======
+# 5.Vrep导入三维模型——PUMA560机械臂
+
+指定关节的类型，其中type可以是以下之一：
+
+- revolute旋转 - 一种铰链接头，沿轴线旋转，并具有由上限和下限指定的有限范围。
+- continuous 连续 - 一个连续的铰链接头，绕轴旋转，没有上限和下限。
+- prismatic 棱柱形 - 滑动接头，沿轴线滑动，并具有由上限和下限指定的有限范围。
+- fixed 修复 - 这不是真正的联合，因为它无法移动。所有自由度都被锁定。这种类型的关节不需要轴，校准，动力学，限制或安全控制器。
+- floating 浮动 - 此关节允许所有6个自由度的运动。
+- planar 平面 - 此关节允许在垂直于轴的平面内运动。
+
+
+
+
+
+# 本节介绍
+
+在推出连载1之后，很多同学问我贴纸是怎么制作的，本节就介绍如何将三维模型导入到vrep中，并进行不同的处理。这个示例采用PUMA560的模型，PUMA560机械臂是多本机器人书籍中介绍的一种机械臂，资料也非常多。
+
+- 本节先介绍如何将三维模型导入到vrep中并建立实际仿真模型；
+- 下一节介绍PUMA560得DH矩阵描述，控制机械臂实现一定功能；
+- 再下一节介绍如何利用Matlab Robotic Toolbox，来控制机械臂
+
+本节的安排如下：
+
+1. 导入前准备工作
+2. 导入模型并简单处理
+3. 提取关键特征，添加运动关节
+4. 提取实体特征
+
+**完整的例程模型请点击购买**
+
+# step1 准备工作
+
+首先要在建模软件中建立机械臂模型，我这里用的是soildworks，建模完的效果如下图：
+
+
+
+![img](Vrep.assets/1924165-09318c3cb828e414.webp)
+
+图1 PUMA560机械臂模型
+
+
+**请注意，下面的经验很重要！！！我就不全部加粗了！！**
+
+1. 导入过程是一个体力活，前期的一点问题可能会导致后面非常麻烦！！！
+   首先，上图的建模结果是“不可以”直接导入到vrep。因为在导入过程中，vrep会保留原来的坐标系关系，也就是说导入到vrep中就是和图1中的样子一样的，具体可以看图2，从图2中可以看出各个臂处于比较随意的状态，这对于vrep这种软件后期调整起来非常麻烦，因此我们要提前调整好机械臂的位置，使其处于一个便于调整的位置，见图3。
+
+
+
+![img](Vrep.assets/1924165-c697c884f8b67f9c.webp)
+
+图2 调整前的机械臂 soildworks视图（左） vrep视图（右）
+
+
+
+![img](Vrep.assets/1924165-3fcca6f46a18c03e.webp)
+
+图3 调整后的机械臂 soildworks视图（左） vrep视图（右）
+
+至于怎么调整，一般团队里都有搞机械的小伙伴，和他们说一下要求就可以了，把该对齐的面对齐就可以了。
+
+1. 现在已经准备好了要导入的模型（本节例程模型请[点击购买](https://item.taobao.com/item.htm?spm=0.7095261.0.0.6b4a1debECMogw&id=566469250957)），那么需要转成什么格式呢？vrep支持好几种三维格式的导入，但是就我自己的使用体验来说，转成**STL**格式最方便，而且大部分的建模软件可以很容易转成stl格式，本文也是基于stl格式进行讲解。
+   不同的软件导出的stl格式也是需要注意的，以soildworks为例，选择`文件-另存为-保存类型（stl）`，在选项里选择**精细**选项。如果你是**新手**并且**模型的规模较小**的话，建议选择精细模式，否则你需要根据需求选择精细程度。
+
+
+
+![img](Vrep.assets/1924165-a9021d858d18f5ac.webp)
+
+图4 导出stl过程
+
+导出stl格式之后，会在文件夹中生成文件，这里需要注意的是有的软件导出后是一个stl文件（将装配体整体导出），soildworks导出的一堆stl文件（每个零件单独一个文件）。如果是一个文件的话，后面会增加一步，不要紧的。
+
+好，到这里导入工作已经完成了，接下来我们将stl文件导入到vrep中。
+
+
+
+# [V-rep学习笔记：转动关节1](https://www.cnblogs.com/21207-iHome/p/5911028.html)
+
+在V-rep中物体姿态以X-Y-Z欧拉角的方式确定（以指定的参考系为初始姿态，然后按X-Y-Z的顺序依次**绕自身**的坐标轴旋转Alpha,Beta,Gamma角度后得到），参考坐标系有world和Parent frame之分,下面来看看这两者有什么区别。
+
+　　先建立一个Plane平面（下图中灰色的正方形），将Plane的坐标系绕自身Z轴旋转90°，然后添加一个Cuboid把它作为Plane的子对象。现在我们选中Cuboid打开其Object orientation对话框，可以看到当选择相对Parent frame时其姿态角位(0,0,-90°)，即以Plane的坐标系为基准，绕自身Z轴旋转-90°得到；而选择World时，姿态角位(0,0,0)，即Cuboid的姿态与世界坐标系的姿态一致。下图可以说明这一别。
+
+![img](Vrep.assets/890966-20160926223801781-1848827749.png)
+
+　　打开V-rep的帮助找到Joint types and operation那一页，里面写道A joint is used to allow for a relative movement between its parent and its children，即joint是用于连接其父对象和子对象，并限制其父子对象相对运动的。
+
+下面添加一个平面作为机架，并在dynamic properties对话框中去掉Body is dynamic选项（when enabled, then the shape's position and orientation will be influenced in a dynamic simulation，由于机架固定不动，因此需要去掉该选项）。将连杆和旋转关节建立好放在合适的位置（下图中将旋转关节放在连杆的最左端。如果放在中间且不添加关节驱动力，在重力作用下连杆不会发生转动）。将Joint设为Torque/force mode，在动力学特性对话框中如果勾选Motor enabled，则关节将带动连杆按指定规律运动；如果没有勾选Motor enabled，则关节成为一个自由关节，连杆受重力作用会绕着关节往复摆动。
+
+　　另外需要注意的是，根据官方文档："Non-static shapes will fall (i.e. be influenced by gravity) if they are not otherwise constrained. Dynamic constraints between shapes can be set-up by attaching two shapes together with a dynamically enabled joint. Dynamically enabled joints are joints that are in force or torque mode or that operate in hybrid fashion, and that have a shape as parent object and exactly one child object which must be a non-static shape." 即如果关节没有设置成动力学模式（Torque/force mode）或着在非动力学模式下没有勾选Hybrid operation选项，连杆将不会被约束住，在重力作用下会坠落。
+
+![img](Vrep.assets/890966-20160927093626000-1020791421.png)
+
+　　下面调整视角，添加一个Graph记录连杆在驱动作用下的旋转角度。打开Graph的对话框在Add new data stream to record中添加要测的数据。注意这里要选择absolute gamma-orientation，因为连杆是绕着自身的Z轴在旋转，测量物体选择Cuboid。关节角速度为30°/s，仿真2s后停止，到达60°的位置，Graph记录了连杆转角随时间的变化。
+
+![img](Vrep.assets/890966-20160927095538297-760041462.png)
+
+　　关节在Torque/force模式下可以设置目标角速度，需要注意的一点是：The target velocity will be instantaneously reached if the maximum torque/force is high enough; otherwise the target velocity is gradually approached. 即如果关节力矩过小，目标速度可能要缓慢才能达到。下面两幅图说明了这种情况。
+
+![img](Vrep.assets/890966-20160927100623344-1602730337.png)![img](Vrep.assets/890966-20160927100631578-2026515707.png)
+
+# [全向轮运动学与V-rep中全向移动机器人仿真](https://www.cnblogs.com/21207-iHome/p/7911748.html)
+
+运动学本质是：轮毂外围安装一周与轮毂轴线呈一定角度的无动力辊子作为轮胎，该辊子不仅可绕轮毂轴公转，也能在地面摩擦力作用下绕各自的支撑芯轴自转，两种运动的合成使得接触地面的辊子中心合速度与轮毂轴有一定的夹角，通过调节轮毂速度可改变辊子中心合速度的大小和方向。由同样结构的若干Mecanum 轮按一定规则组成的轮组系统，通过改变各轮毂速度的线性组合，进而控制运动系统中心合速度大小和方向，使机器人实现平面3自由度全方位运动。由于其外观上与斜齿轮相似，麦克纳姆轮也有齿轮啮合时相类似的问题：为了保证运动的平稳性，当前一个辊子与地面即将分离时，后一个辊子必须与地面接触。 
+
+![img](Vrep.assets/890966-20171128194616878-39347295.png)
+
+## 全向轮运动学 
+
+　　如下图所示，坐标系{S}为空间中静止的参考系，坐标系{b}固定在车身上随机器人运动。那么机器人在静止参考系中的位置和姿态可以用向量q描述,q=(ϕ,x,y)。在自身参考系{b}中的线速度及角速度为υb=(ωbz,vbx,vby)
+
+![img](Vrep.assets/890966-20171129161325769-1099918021.png)
+
+　　那么两个参考系之间速度的转换公式如下：
+
+![img](Vrep.assets/890966-20171129162338784-806118636.png)
+
+ 　　全方位移动机器人必须安装至少3个全向轮，才能实现以任意三维速度q˙=(ϕ˙,x˙,y˙)进行运动。下图为两种典型的全向移动机器人，一种装有3个全向轮，另一种装有4个麦克纳姆轮。
+
+![img](Vrep.assets/890966-20171129164847331-1437394940.png)
+
+　　为了控制全向移动机器人，我们需要知道给每个轮子多大的角速度才能使机器人达到目标速度q˙。为了解答这个问题，我们需要理解单个轮子的运动学，为此建立如下图所示的轮子坐标系：
+
+![img](Vrep.assets/890966-20171129165652472-889067481.png)
+
+坐标系Xw^−Yw^建立在轮子中心，根据速度合成定理车轮中心的速度v=(vx,vy)满足下面的公式：
+
+![img](Vrep.assets/890966-20171129170304378-300466636.png)
+
+其中γγ为小辊子滚动方向与驱动轮平面的夹角（通常全向轮为0°，麦克纳姆轮为±45°），vdrivevdrive是驱动速度，vslidevslide是自由滑动的速度。解方程(13.3)可以得到
+
+![img](Vrep.assets/890966-20171129171316034-413596027.png)
+
+　　假设轮子半径为rr，轮子转动的角速度为uu，那么根据上式可得：
+
+![img](Vrep.assets/890966-20171129171347362-1006788788.png)
+
+ 　　为了推导出从小车速度q˙=(ϕ˙,x˙,y˙)q˙=(ϕ˙,x˙,y˙)到轮子ii的角速度uiui的转换关系，参考最上面的坐标系布置图。轮子坐标系在小车坐标系{b}中的位置和姿态可以用向量(βi,xi,yi)(βi,xi,yi)来表达，其中轮子半径为riri，辊子滑动角度为γiγi。那么从q˙q˙到uiui的转换关系如下：
+
+![img](Vrep.assets/890966-20171129172252659-33357353.png)
+
+从右到左进行解读：第一个变换矩阵将静止坐标系下的q˙q˙变换为小车局部坐标系{b}中的υbυb；第二个变换矩阵将小车的局部速度转换为坐标系{b}中的轮子线速度；第三个变换矩阵将坐标系{b}中的轮子线速度转换为轮子坐标系Xw^−Yw^Xw^−Yw^中的线速度；最后一个变换矩阵将依据公式(13.4)计算轮子角速度。
+
+　　将这几个矩阵合并，可以得到对单个轮子的变换矩阵hi(ϕ)hi(ϕ)如下：
+
+![img](Vrep.assets/890966-20171129173039831-1335619856.png)
+
+　　对于一个全向移动机器人来说，轮子数量m⩾3m⩾3，矩阵H(ϕ)∈Rm×3H(ϕ)∈Rm×3将静止参考系中的机器人速度q˙∈R3q˙∈R3转换为轮子驱动角速度u∈Rmu∈Rm，将m行hi(ϕ)hi(ϕ)向量堆叠到一起组成矩阵H(ϕ)H(ϕ)，有如下公式：
+
+![img](Vrep.assets/890966-20171129173607347-2112495817.png)
+
+　　根据上式我们也可以直接计算出小车局部坐标系下的速度和驱动轮角速度之间的关系，这时转换矩阵将不依赖小车在静止参考坐标系中的朝向角ϕϕ：
+
+![img](Vrep.assets/890966-20171129173836300-809989026.png)
+
+　　小车上轮子的位置和朝向(βi,xi,yi)(βi,xi,yi)，以及辊子夹角γiγi的选择必须使得矩阵H(0)H(0)的秩为3。如果rank(H) < 3，则系统中存在奇异位形，反映在运动学上就是失去部分自由度，即小车不能实现全方位运动。
+
+由于全向轮结构和运动学的特殊性，系统中并不是任一种轮组排列结构形式都可实现全方位运动，多轮构成的系统运动能力和运动控制性能及其驱动性能均与轮组的结构形式密切相关。下面就是两种典型的布局，麦克纳姆轮在小车中的朝向都一致βi=0βi=0：
+
+![img](Vrep.assets/890966-20171129174154940-1652771524.png)
+
+ 　　根据上面的公式，3个全向轮布置的移动机器人运动学模型为：
+
+![img](Vrep.assets/890966-20171129174932737-1681435510.png)
+
+　　4个麦克纳姆轮布置的移动机器人运动学模型为：
+
+![img](Vrep.assets/890966-20171129175034081-797767328.png)
+
+　　对麦克纳姆轮型移动机器人来说，为向前移动，所有轮子要以相同的速度向前转动；为了侧向移动，1、3轮向前转，2、4轮向后转，转速要相同...
+
+![img](Vrep.assets/890966-20171129181319331-828543980.png)
+
+## V-rep中全向移动机器人仿真 
+
+ 　　在V-rep的模型浏览器中可以找到麦克纳姆轮组件：
+
+![img](Vrep.assets/890966-20171129190502495-423217073.png)　　
+
+​		为了搭建麦克纳姆轮的模型，一种很自然的想法是在轮毂上创建多个关节，并在关节上添加与地面接触的辊子。这样虽然符合实际情况，但是会影响仿真速度、仿真稳定性及精度。There is the obvious natural approach to simulate them by modelling each auxiliary wheel on top of the actuated wheel. This will slow down simulation, make it less stable, and also less precise. But this is possible. The better approach for this is to use a trick: instead of using a complicated wheel, simply use a sphere, attached to a passive axis, itself attached to a non-respondable sphere, itself attached to an actuated axis. Then, in each simulation step, reset the orientation of the passive wheel.
+
+我们看看V-rep中麦克纳姆轮是怎样搭建起来的（参考V-rep Forum里的这两个问题：*Object Orientation around an Axis*，*Robotino problem*）。在图层中将轮子的虚拟外形隐藏，显示两个转动关节以及实际与地面接触的“轮子”。从下图可以看出这个实际的轮子是由一个球体模拟的，这个球不仅可以绕着驱动轴转动，还可以绕着另一个虚拟轴free "sliding" joint转动，转动方向即为free "sliding" direction。
+
+![img](Vrep.assets/890966-20171129213015042-1302329825.png)
+
+　　这两个轴之间的角度即为上面讨论的γγ角。注意要从底面方向上看（可以切换到bottom view），因为轮子与地面接触的辊子在最下端，不要看反了：
+
+![img](Vrep.assets/890966-20171130150036464-5720059.png)
+
+　　V-rep中提供的mecanum轮由两个转动关节和两个球体组成，用来模拟实际复杂的轮子。The wheel is composed by 2 spheres and 2 revolute joints in following configuration: robotBody → activeJoint → nonRespondableSphere → passiveJoint → respondableSphere
+
+![img](Vrep.assets/890966-20171130123008917-351477668.png)
+
+V-rep中进行动力学仿真时对dynamic chain以及物体质量属性等参数有一系列要求，为了能正确进行仿真必须遵守这些准则，具体要参考官方文档：**Designing dynamic simulations****.**
+
+　　Dynamically enabled joints are joints that are in force or torque mode, and that have a shape as parent object and exactly one child object which must be a non-static shape. Following are a few example situations where a joint won't be dynamically enabled:
+
+- the joint is not in force or torque mode, and the joint is not operating in a hybrid fashion.
+- the joint's parent is not a shape.
+- the joint has more than one child object.
+- the joint directly connects to another joint.
+- the joint (or one of the two shapes it connects) is located in a model (hierarchy tree) that is not dynamically simulated 
+
+　　注意V-rep中的[球型关节](http://www.cnblogs.com/21207-iHome/p/6906111.html)本质上是直接由三个正交的转动副串接而成的。考虑到上面第4点，这三个关节直接相互串接，因此球型关节不能设置为Torque/force模式，它总是工作在passive模式。Spherical joints are always passive joints, and cannot act as motors.
+
+![img](Vrep.assets/890966-20171130125614026-47170522.png)
+
+[Two equivalent mechanisms (in this configuration): spherical joint (left) and 3 revolute joints (right)]
+
+ 　　Never have a static shape between two dynamic items. The static shape will interrupt the logical behaviour of the dynamic chain:
+
+![img](Vrep.assets/890966-20171130130041979-252136065.png)
+
+[Wrong and correct construction]
+
+ 　　基于这几点考虑要在activeJoint → passiveJoint的运动链中插入nonRespondableSphere，这个中间连接件是non-static & non-respondable的。如果是static类型，那么仿真时在驱动关节旁边会出现警告图标。Objects that are supposed to by dynamically simulated but which, for a reason or another cannot be dynamically simulated, will display following the warning icon：
+
+![img](Vrep.assets/890966-20171130140932245-1464738026.png)
+
+　　在进行动力学仿真时点击工具栏上的Visualize and verify dynamic content按钮，就可以以不同颜色显示各个图层（包括隐藏图层）中的动态物体。
+
+![img](Vrep.assets/890966-20171130111341808-219519040.png)
+
+[Dynamic content visualization button]
+
+　　下面是几种颜色类型。pure shape物体的边线为黑色，其中non-static&respondable类型的物体面为红色，static&respondable类型的物体面为白色。Torque/force模式下的关节如果motor enabled颜色为红色，如果没有enabled，颜色为蓝色。注意点击显示动态内容的按钮后，Passive等模式下的关节将不会在仿真时显示出来。
+
+![img](Vrep.assets/890966-20171130111817854-144178020.png)
+
+　　从下图我们可以很清楚地看出YouBot由不同动力学特性的部件构成。其中，以蓝色显示的自由关节在底盘运动过程中始终保持水平，没有随着父节点的驱动关节一起旋转。这是因为在脚本执行过程中会周期性的调用函数设置该关节相对于驱动关节的位置和姿态。如果我们将这两行代码注释掉，或者直接disable这个脚本，那么在仿真过程中这个自由关节会随着驱动关节一起旋转，底盘运动时会产生奇怪的行为。
+
+![img](Vrep.assets/890966-20171130141236058-37116726.png)
+
+ 　　接下来看一个用麦克纳姆轮搭建的移动机器人的例子。在模型浏览器中的移动机器人目录下找到KUKA YouBot模型，并将其拖入新建的场景中：
+
+![img](Vrep.assets/890966-20171129190659995-1875256743.png)
+
+　　删掉机械臂相关的结构和代码，选中youBot进行仿真会弹出一个GUI界面，通过上面的滑块可以控制底盘的前进后退、横向移动以及转动速度：
+
+![img](Vrep.assets/890966-20171129193135026-190542359.gif)
+
+ 　　注意YouBot的原始Lua代码中控制麦克纳姆轮底盘运动时并没有按照实际的公式去计算4个轮子的角速度（忽略了轮子尺寸，以及轮子间距等几何参数），在V-rep中测得这些参数后再修改公式的代码如下：
+
+```lua
+if (sim_call_type==sim_childscriptcall_initialization) then 
+
+    -- Make sure we have version 2.4.12 or above (the omni-wheels are not supported otherwise)
+    v=simGetInt32Parameter(sim_intparam_program_version)
+    if (v<20412) then
+        simDisplayDialog('Warning','The YouBot model is only fully supported from V-REP version 2.4.12 and above.&&nThis simulation will not run as expected!',sim_dlgstyle_ok,false,'',nil,{0.8,0,0,0,0,0})
+    end
+
+    --Prepare initial values and retrieve handles:
+    wheelJoints={-1,-1,-1,-1} -- front left, rear left, rear right, front right
+    wheelJoints[1]=simGetObjectHandle('rollingJoint_fl')
+    wheelJoints[2]=simGetObjectHandle('rollingJoint_rl')
+    wheelJoints[3]=simGetObjectHandle('rollingJoint_rr')
+    wheelJoints[4]=simGetObjectHandle('rollingJoint_fr')
+
+    youBot=simGetObjectHandle('youBot')
+    ui=simGetUIHandle('youBot_UI')
+    simSetUIButtonLabel(ui,0,simGetObjectName(youBot)..' user interface') -- Set the UI title (with the name of the current robot)
+
+    forwBackVelRange={-240*math.pi/180,240*math.pi/180}  -- min and max wheel rotation vel. for backward/forward movement
+    leftRightVelRange={-240*math.pi/180,240*math.pi/180} -- min and max wheel rotation vel. for left/right movement
+    rotVelRange={-240*math.pi/180,240*math.pi/180}       -- min and max wheel rotation vel. for left/right rotation movement
+
+    forwBackVel=0
+    leftRightVel=0
+    rotVel=0
+
+    r= 0.05  -- wheel radius(m)
+end 
+
+
+if (sim_call_type==sim_childscriptcall_actuation) then 
+
+    buttonID=simGetUIEventButton(ui)
+    if (buttonID==200) then -- Forward/backward slider was changed
+        forwBackVel=forwBackVelRange[1]+simGetUISlider(ui,buttonID)*0.001*(forwBackVelRange[2]-forwBackVelRange[1])
+    end
+    if (buttonID==201) then -- left/right slider was changed
+        leftRightVel=leftRightVelRange[1]+simGetUISlider(ui,buttonID)*0.001*(leftRightVelRange[2]-leftRightVelRange[1])
+    end
+    if (buttonID==202) then -- left/right rotation slider was changed
+        rotVel=rotVelRange[1]+simGetUISlider(ui,buttonID)*0.001*(rotVelRange[2]-rotVelRange[1])
+    end
+    if (buttonID==212) then -- stop button was clicked
+        forwBackVel=0
+        leftRightVel=0
+        rotVel=0
+        -- Reset the wheel movement sliders to the neutral position:
+        simSetUISlider(ui,200,500)
+        simSetUISlider(ui,201,500)
+        simSetUISlider(ui,202,500)
+    end
+
+    -- Now apply the desired wheel velocities:
+--[[
+    simSetJointTargetVelocity(wheelJoints[1],-forwBackVel-leftRightVel-rotVel)
+    simSetJointTargetVelocity(wheelJoints[2],-forwBackVel+leftRightVel-rotVel)
+    simSetJointTargetVelocity(wheelJoints[3],-forwBackVel-leftRightVel+rotVel)
+    simSetJointTargetVelocity(wheelJoints[4],-forwBackVel+leftRightVel+rotVel)
+--]]
+    simAddStatusbarMessage(string.format("Vx:%.2f  Vy:%.2f  Rot:%.2f", forwBackVel,leftRightVel,rotVel))
+
+    simSetJointTargetVelocity(wheelJoints[1], (-forwBackVel-leftRightVel-0.38655*rotVel)/r )
+    simSetJointTargetVelocity(wheelJoints[2], (-forwBackVel+leftRightVel-0.38655*rotVel)/r )
+    simSetJointTargetVelocity(wheelJoints[3], (-forwBackVel-leftRightVel+0.38655*rotVel)/r )
+    simSetJointTargetVelocity(wheelJoints[4], (-forwBackVel+leftRightVel+0.38655*rotVel)/r )
+a
+```
+
+修改代码后V-rep的状态栏中会显示滑块设定的角速度。为了验证公式的正确性，我们可以添加一个Graph来记录底盘旋转时的角速度，与设定值进行对比。经过比较，发现设定值与实际值相差很小。由于尺寸测量时的误差以及物理仿真涉及到轮子与地面的接触、摩擦等因素影响，还是会存在一定的误差。
+
+![img](Vrep.assets/890966-20171129203530573-1467273784.gif)
+>>>>>>> cb3ec3b0979414359fd2847002199f6e9af3a4e6
