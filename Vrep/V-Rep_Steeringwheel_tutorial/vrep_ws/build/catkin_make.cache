@@ -1,0 +1,2 @@
+keyboard:vrep_pkg
+-DCATKIN_DEVEL_PREFIX=/home/chrisliu/桌面/Notes/Vrep/V-Rep_Steeringwheel_tutorial/vrep_ws/devel -DCMAKE_INSTALL_PREFIX=/home/chrisliu/桌面/Notes/Vrep/V-Rep_Steeringwheel_tutorial/vrep_ws/install -G Unix Makefiles

@@ -90,6 +90,10 @@ expanded in all directions->high cost
 
 ## 2.1.1 A*
 
+**heuristic:启发式的**
+
+
+
 mainly toward the goal->lower cost
 
 1. 建立状态空间模型
@@ -110,3 +114,4 @@ mainly toward the goal->lower cost
 ### 2.2.3 Informed RRT*(启发式RRTstar)
 
 ## 
+
